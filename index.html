@@ -12,7 +12,7 @@
 <meta name="application-name" content="Spin the Wheel">
 <meta name="theme-color" content="#4CAF50">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Roue</title>
+<title>Spin the Wheel</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body {
@@ -371,30 +371,35 @@ function spinWheel() {
   btn.disabled = true; btn.textContent = '...';
   lastTickSeg = -1;
 
-  // Vrai aléatoire : on évite le dernier gagnant et on ajoute du bruit sur la position finale
   const n = entries.length;
-  let pick;
-  // Essaye plusieurs fois pour éviter de retomber sur le même
-  for (let attempt = 0; attempt < 20; attempt++) {
-    pick = Math.floor(Math.random() * n);
-    if (pick !== winnerIdx || n <= 1) break;
-  }
+
+  // Vrai aléatoire via crypto
+  const buf = new Uint32Array(4);
+  crypto.getRandomValues(buf);
+  const r1 = buf[0] / 0xFFFFFFFF;
+  const r2 = buf[1] / 0xFFFFFFFF;
+  const r3 = buf[2] / 0xFFFFFFFF;
+  const r4 = buf[3] / 0xFFFFFFFF;
+
+  // Choix du gagnant — évite le même deux fois de suite
+  let pick = Math.floor(r1 * n);
+  if (pick === winnerIdx && n > 1) pick = (pick + 1 + Math.floor(r2 * (n - 1))) % n;
   winnerIdx = pick;
 
   const slice = (Math.PI*2)/n;
-  // Nombre de tours aléatoire entre 7 et 13
-  const extraSpins = (7 + Math.floor(Math.random() * 7)) * Math.PI * 2;
-  // Position aléatoire DANS le segment (pas forcément au centre)
-  const randomOffsetInSlice = (Math.random() * 0.7 - 0.35) * slice;
-  const centerOfWinner = -(winnerIdx + 0.5) * slice + randomOffsetInSlice;
+  // 8 à 15 tours complets
+  const extraSpins = (8 + Math.floor(r2 * 8)) * Math.PI * 2;
+  // Atterrit à un endroit aléatoire dans le segment
+  const offsetInSlice = (r3 * 0.8 - 0.4) * slice;
+  const centerOfWinner = -(winnerIdx + 0.5) * slice + offsetInSlice;
   let target = centerOfWinner + extraSpins;
-  while (target < currentAngle + Math.PI * 6) target += Math.PI * 2;
+  while (target < currentAngle + Math.PI * 7) target += Math.PI * 2;
 
   spinStartAngle = currentAngle;
   targetAngle = target;
   animStart = null;
-  // Durée variable pour casser le pattern
-  animDuration = 3500 + Math.random() * 2500;
+  // Durée vraiment variable : 4s à 7s
+  animDuration = 4000 + r4 * 3000;
   requestAnimationFrame(animTick);
 }
 
