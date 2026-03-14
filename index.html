@@ -2,9 +2,16 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
+<!-- Icône Apple -->
+<link rel="apple-touch-icon" href="IMG_0345.jpg">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Spin the Wheel">
+<!-- Icône Android / Samsung -->
+<link rel="icon" type="image/jpeg" href="IMG_0345.jpg">
+<link rel="manifest" href="manifest.json">
+<meta name="application-name" content="Spin the Wheel">
+<meta name="theme-color" content="#4CAF50">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="icon" type="image/png" href="IMG_0345.png">
-<link rel="apple-touch-icon" sizes="180x180" href="IMG_0345.png">
 <title>Roue</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
@@ -255,8 +262,44 @@ function resizeCanvas() {
   canvas.style.height = size + 'px';
 }
 
+// ── Font size cache — précalculé, jamais recalculé pendant le spin ────────────
+let fontSizeCache = [];
+let cacheBasis = '';
+
+function buildFontCache() {
+  const W = canvas.width, R = W/2 - 4;
+  const n = entries.length;
+  const key = n + '|' + Math.round(R);
+  if (key === cacheBasis) return;
+  cacheBasis = key;
+  fontSizeCache = [];
+  if (n === 0) return;
+  const slice = (Math.PI*2)/n;
+  const textRadius = R * 0.58;
+
+  // Largeur de l'arc au rayon textRadius
+  const arcWidth = 2 * textRadius * Math.sin(Math.max(slice / 2, 0.02));
+  // Longueur radiale dispo
+  const radialLen = R * 0.72;
+  // Le texte DOIT tenir dans les deux dimensions — on prend le min strict
+  const maxW = Math.min(arcWidth * 0.82, radialLen);
+
+  for (let i = 0; i < n; i++) {
+    const label = entries[i];
+    let fs = 140;
+    ctx.font = `bold ${fs}px Arial`;
+    while (fs > 10 && ctx.measureText(label).width > maxW) { fs--; ctx.font = `bold ${fs}px Arial`; }
+    fontSizeCache[i] = fs;
+  }
+}
+
 // ── Draw ──────────────────────────────────────────────────────────────────────
+let lastDrawnAngle = null;
+
 function drawWheel(highlightIdx) {
+  if (!spinning && lastDrawnAngle === currentAngle && highlightIdx === undefined) return;
+  lastDrawnAngle = currentAngle;
+
   const W = canvas.width, H = canvas.height;
   const cx = W/2, cy = H/2, R = W/2 - 4;
   ctx.clearRect(0, 0, W, H);
@@ -271,7 +314,9 @@ function drawWheel(highlightIdx) {
     return;
   }
 
-  const slice = (Math.PI * 2) / n;
+  buildFontCache();
+  const slice = (Math.PI*2)/n;
+  const textRadius = R * 0.58;
 
   for (let i = 0; i < n; i++) {
     const startA = currentAngle + i * slice;
@@ -288,39 +333,16 @@ function drawWheel(highlightIdx) {
     ctx.strokeStyle = 'rgba(255,255,255,0.7)';
     ctx.lineWidth = 2; ctx.stroke();
 
-    // Text — adapte taille pour tout afficher
+    // Text — taille précalculée, pas de recalcul pendant le spin
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(startA + slice / 2);
-
-    const label = entries[i];
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = contrastColor(color);
-    ctx.shadowColor = 'rgba(0,0,0,0.4)';
-    ctx.shadowBlur = 4;
-
-    const textRadius = R * 0.62;
-    // Largeur de l'arc au milieu du segment
-    const arcWidth = 2 * textRadius * Math.sin(Math.max(slice / 2, 0.02));
-    // Longueur radiale disponible
-    const radialLen = R * 0.78;
-    // On contraint par les DEUX : doit tenir dans l'arc ET dans le rayon
-    const maxW = Math.min(arcWidth * 0.88, radialLen * 0.75);
-
-    // Réduit le lag : pas de shadow pendant le spin, step de 1px
-    if (!spinning) {
-      ctx.shadowColor = 'rgba(0,0,0,0.4)';
-      ctx.shadowBlur = 4;
-    }
-    let fontSize = 120;
-    ctx.font = `bold ${fontSize}px Arial`;
-    while (fontSize > 12 && ctx.measureText(label).width > maxW) {
-      fontSize -= 1;
-      ctx.font = `bold ${fontSize}px Arial`;
-    }
-
-    ctx.fillText(label, textRadius, 0);
+    ctx.fillStyle = '#ffffff';
+    if (!spinning) { ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 4; }
+    ctx.font = `bold ${fontSizeCache[i]}px Arial`;
+    ctx.fillText(entries[i], textRadius, 0);
     ctx.shadowBlur = 0;
     ctx.restore();
   }
@@ -333,15 +355,6 @@ function drawWheel(highlightIdx) {
   ctx.beginPath(); ctx.arc(cx,cy,40,0,Math.PI*2);
   ctx.fillStyle = 'white'; ctx.fill();
   ctx.strokeStyle = '#aaa'; ctx.lineWidth = 2.5; ctx.stroke();
-}
-
-// Cache last drawn angle to skip redundant redraws
-let lastDrawnAngle = null;
-const _drawWheel = drawWheel;
-drawWheel = function(highlightIdx) {
-  if (!spinning && lastDrawnAngle === currentAngle && highlightIdx === undefined) return;
-  lastDrawnAngle = currentAngle;
-  _drawWheel(highlightIdx);
 }
 
 function contrastColor(hex) {
@@ -358,18 +371,30 @@ function spinWheel() {
   btn.disabled = true; btn.textContent = '...';
   lastTickSeg = -1;
 
-  winnerIdx = Math.floor(Math.random() * entries.length);
+  // Vrai aléatoire : on évite le dernier gagnant et on ajoute du bruit sur la position finale
   const n = entries.length;
+  let pick;
+  // Essaye plusieurs fois pour éviter de retomber sur le même
+  for (let attempt = 0; attempt < 20; attempt++) {
+    pick = Math.floor(Math.random() * n);
+    if (pick !== winnerIdx || n <= 1) break;
+  }
+  winnerIdx = pick;
+
   const slice = (Math.PI*2)/n;
-  const extraSpins = (6 + Math.floor(Math.random()*5)) * Math.PI*2;
-  const centerOfWinner = -(winnerIdx + 0.5) * slice;
+  // Nombre de tours aléatoire entre 7 et 13
+  const extraSpins = (7 + Math.floor(Math.random() * 7)) * Math.PI * 2;
+  // Position aléatoire DANS le segment (pas forcément au centre)
+  const randomOffsetInSlice = (Math.random() * 0.7 - 0.35) * slice;
+  const centerOfWinner = -(winnerIdx + 0.5) * slice + randomOffsetInSlice;
   let target = centerOfWinner + extraSpins;
-  while (target < currentAngle + Math.PI*5) target += Math.PI*2;
+  while (target < currentAngle + Math.PI * 6) target += Math.PI * 2;
 
   spinStartAngle = currentAngle;
   targetAngle = target;
   animStart = null;
-  animDuration = 4000 + Math.random()*1500;
+  // Durée variable pour casser le pattern
+  animDuration = 3500 + Math.random() * 2500;
   requestAnimationFrame(animTick);
 }
 
@@ -457,6 +482,7 @@ function updateDrawerCount() {
 function applyDrawer() {
   const val = document.getElementById('drawer-ta').value;
   entries = val.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
+  cacheBasis = ''; // invalide le cache
   closeDrawer();
   drawWheel();
 }
@@ -471,11 +497,12 @@ function shuffleInDrawer() {
 // ── Top bar actions ───────────────────────────────────────────────────────────
 function shuffleDirect() {
   for (let i=entries.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1));[entries[i],entries[j]]=[entries[j],entries[i]]; }
+  cacheBasis='';
   drawWheel();
 }
 
 function clearAll() {
-  if (confirm('Effacer toutes les options ?')) { entries=[]; drawWheel(); }
+  if (confirm('Effacer toutes les options ?')) { entries=[]; cacheBasis=''; drawWheel(); }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
